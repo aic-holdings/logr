@@ -110,7 +110,7 @@ class LogEvent(Base):
     content_type = Column(String(50), default="text/plain")  # MIME type
 
     # === Metadata ===
-    metadata = Column(JSONB, default=dict)  # Event-specific metadata
+    event_metadata = Column(JSONB, default=dict)  # Event-specific metadata
     sequence = Column(Integer, default=0)  # Order within the log entry
 
     # === Timing ===

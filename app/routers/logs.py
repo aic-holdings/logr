@@ -266,7 +266,7 @@ async def create_log(
             event_type=event_data.event_type,
             content=event_data.content,
             content_type=event_data.content_type,
-            metadata=event_data.metadata,
+            event_metadata=event_data.metadata,
             sequence=event_data.sequence,
             duration_ms=event_data.duration_ms,
         )
@@ -325,7 +325,7 @@ async def create_logs_batch(
                     event_type=event_data.event_type,
                     content=event_data.content,
                     content_type=event_data.content_type,
-                    metadata=event_data.metadata,
+                    event_metadata=event_data.metadata,
                     sequence=event_data.sequence,
                     duration_ms=event_data.duration_ms,
                 )

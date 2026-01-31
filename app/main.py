@@ -1,13 +1,22 @@
 """Logr - Centralized structured logging service for AI-powered analysis."""
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy import text
 
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, async_session_maker
 from app.routers import logs, spans, search, admin
+from app.middleware import (
+    RateLimitMiddleware,
+    RequestSizeLimitMiddleware,
+    MetricsMiddleware,
+)
+
+# Global metrics instance
+metrics_middleware = None
 
 
 @asynccontextmanager
@@ -56,31 +65,17 @@ httpx.post(
         "user_id": "U123"
     }
 )
-
-# LLM operation with events
-httpx.post(
-    "https://logr.jettaintelligence.com/v1/logs",
-    headers={"Authorization": "Bearer logr_xxx"},
-    json={
-        "service": "chatbot",
-        "level": "info",
-        "message": "LLM completion",
-        "model": "claude-3-opus",
-        "tokens_in": 500,
-        "tokens_out": 1200,
-        "cost_usd": 0.045,
-        "duration_ms": 3500,
-        "events": [
-            {"event_type": "prompt", "content": "What is..."},
-            {"event_type": "completion", "content": "The answer is..."}
-        ]
-    }
-)
 ```
     """,
     version=settings.VERSION,
     lifespan=lifespan,
 )
+
+# Add middleware (order matters - first added = outermost)
+metrics_middleware = MetricsMiddleware(app)
+app.add_middleware(MetricsMiddleware)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=1000)
+app.add_middleware(RequestSizeLimitMiddleware, max_size_mb=10)
 
 # CORS
 app.add_middleware(
@@ -100,16 +95,92 @@ app.include_router(admin.router)
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
+    """
+    Health check endpoint with database connectivity test.
+
+    Returns service status and feature availability.
+    """
+    db_healthy = False
+    db_error = None
+
+    try:
+        async with async_session_maker() as session:
+            await session.execute(text("SELECT 1"))
+            db_healthy = True
+    except Exception as e:
+        db_error = str(e)
+
+    status = "healthy" if db_healthy else "degraded"
+
     return {
-        "status": "healthy",
+        "status": status,
         "service": settings.SERVICE_NAME,
         "version": settings.VERSION,
+        "database": {
+            "status": "connected" if db_healthy else "disconnected",
+            "error": db_error,
+        },
         "features": {
             "embeddings": bool(settings.ARTEMIS_API_KEY),
             "retention_days": settings.LOG_RETENTION_DAYS,
         }
     }
+
+
+@app.get("/metrics")
+async def get_metrics():
+    """
+    Prometheus-compatible metrics endpoint.
+
+    Returns key operational metrics for monitoring.
+    """
+    # Get metrics from middleware
+    global metrics_middleware
+    if metrics_middleware:
+        return metrics_middleware.get_metrics()
+
+    return {
+        "uptime_seconds": 0,
+        "total_requests": 0,
+        "error_count": 0,
+        "error_rate": 0,
+        "avg_latency_ms": 0,
+        "status_codes": {},
+    }
+
+
+@app.get("/metrics/prometheus", response_class=PlainTextResponse)
+async def get_prometheus_metrics():
+    """
+    Prometheus text format metrics.
+
+    Can be scraped directly by Prometheus.
+    """
+    global metrics_middleware
+    if not metrics_middleware:
+        return ""
+
+    m = metrics_middleware.get_metrics()
+
+    lines = [
+        f"# HELP logr_uptime_seconds Time since service started",
+        f"# TYPE logr_uptime_seconds gauge",
+        f'logr_uptime_seconds {m["uptime_seconds"]:.2f}',
+        f"# HELP logr_requests_total Total number of requests",
+        f"# TYPE logr_requests_total counter",
+        f'logr_requests_total {m["total_requests"]}',
+        f"# HELP logr_errors_total Total number of errors",
+        f"# TYPE logr_errors_total counter",
+        f'logr_errors_total {m["error_count"]}',
+        f"# HELP logr_request_latency_ms Average request latency in milliseconds",
+        f"# TYPE logr_request_latency_ms gauge",
+        f'logr_request_latency_ms {m["avg_latency_ms"]:.2f}',
+    ]
+
+    for status_code, count in m.get("status_codes", {}).items():
+        lines.append(f'logr_status_code_total{{code="{status_code}"}} {count}')
+
+    return "\n".join(lines)
 
 
 @app.get("/")
@@ -125,6 +196,8 @@ async def root():
             "spans": "/v1/spans",
             "search": "/v1/search",
             "admin": "/v1/admin",
+            "health": "/health",
+            "metrics": "/metrics",
         }
     }
 

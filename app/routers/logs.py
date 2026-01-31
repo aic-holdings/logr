@@ -12,6 +12,14 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models import LogEntry, LogEvent, APIKey
 from app.auth import verify_write_permission, verify_read_permission
+from app.middleware import (
+    validate_log_level,
+    validate_event_type,
+    validate_message_length,
+    validate_context_size,
+    VALID_LOG_LEVELS,
+    VALID_EVENT_TYPES,
+)
 
 router = APIRouter(prefix="/v1/logs", tags=["Logs"])
 
@@ -216,9 +224,20 @@ async def create_log(
     }
     ```
     """
+    # Validate inputs
+    try:
+        validated_level = validate_log_level(log.level)
+        validate_message_length(log.message)
+        if log.context:
+            validate_context_size(log.context)
+        for event in log.events:
+            validate_event_type(event.event_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     entry = LogEntry(
         service=log.service,
-        level=log.level.lower(),
+        level=validated_level,
         message=log.message,
         context=log.context,
         environment=log.environment,

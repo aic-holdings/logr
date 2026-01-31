@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getServerLogrClient } from "@/lib/logr"
+import { getServerLogrClient, type AdminStats } from "@/lib/logr"
 
-async function getStats() {
+async function getStats(): Promise<AdminStats | null> {
   try {
     const client = getServerLogrClient()
     const stats = await client.getAdminStats()

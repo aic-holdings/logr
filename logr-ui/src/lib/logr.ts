@@ -88,6 +88,52 @@ export interface APIKey {
   revoked: boolean
 }
 
+export interface RetentionStats {
+  retention_days: number
+  logs_to_delete: number
+  oldest_log: string | null
+}
+
+export interface ErrorSpike {
+  service: string
+  current_rate: number
+  baseline_rate: number
+  increase: number
+}
+
+export interface LatencyAnomaly {
+  service: string
+  current_avg: number
+  baseline_avg: number
+  increase: number
+}
+
+export interface NewErrorType {
+  error_type: string
+  service: string
+  first_seen: string
+  count: number
+}
+
+export interface AnomaliesResponse {
+  error_spikes: ErrorSpike[]
+  latency_anomalies: LatencyAnomaly[]
+  new_error_types: NewErrorType[]
+}
+
+export interface AdminStats {
+  logs: number
+  events: number
+  spans: number
+  service_accounts: number
+  api_keys: number
+  retention_days: number
+  date_range: {
+    oldest: string | null
+    newest: string | null
+  }
+}
+
 class LogrClient {
   private apiKey: string
 
@@ -174,7 +220,7 @@ class LogrClient {
     })
   }
 
-  async detectAnomalies(hours: number = 24): Promise<Record<string, unknown>> {
+  async detectAnomalies(hours: number = 24): Promise<AnomaliesResponse> {
     return this.fetch(`/v1/search/anomalies?hours=${hours}`)
   }
 
@@ -206,11 +252,11 @@ class LogrClient {
     return this.fetch(`/v1/admin/keys/${keyId}`, { method: "DELETE" })
   }
 
-  async getAdminStats(): Promise<Record<string, unknown>> {
+  async getAdminStats(): Promise<AdminStats> {
     return this.fetch("/v1/admin/stats")
   }
 
-  async getRetentionStats(): Promise<Record<string, unknown>> {
+  async getRetentionStats(): Promise<RetentionStats> {
     return this.fetch("/v1/admin/retention/stats")
   }
 }

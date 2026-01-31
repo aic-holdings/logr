@@ -1,8 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getServerLogrClient } from "@/lib/logr"
+import { getServerLogrClient, type AnomaliesResponse } from "@/lib/logr"
 import { AlertTriangle, TrendingUp, Zap } from "lucide-react"
 
-async function getAnomalies() {
+async function getAnomalies(): Promise<AnomaliesResponse | null> {
   try {
     const client = getServerLogrClient()
     return await client.detectAnomalies(24)
@@ -79,9 +79,9 @@ export default async function AnomaliesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {anomalies?.error_spikes?.length > 0 ? (
+          {anomalies && anomalies.error_spikes.length > 0 ? (
             <div className="space-y-4">
-              {anomalies.error_spikes.map((spike: { service: string; current_rate: number; baseline_rate: number; increase: number }, i: number) => (
+              {anomalies.error_spikes.map((spike, i) => (
                 <div key={i} className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
                   <div>
                     <span className="font-medium">{spike.service}</span>
@@ -112,9 +112,9 @@ export default async function AnomaliesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {anomalies?.new_error_types?.length > 0 ? (
+          {anomalies && anomalies.new_error_types.length > 0 ? (
             <div className="space-y-2">
-              {anomalies.new_error_types.map((error: { error_type: string; service: string; first_seen: string; count: number }, i: number) => (
+              {anomalies.new_error_types.map((error, i) => (
                 <div key={i} className="flex items-center justify-between p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
                   <div>
                     <span className="font-medium font-mono">{error.error_type}</span>

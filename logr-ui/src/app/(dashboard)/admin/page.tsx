@@ -1,8 +1,12 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getServerLogrClient, type ServiceAccount, type APIKey } from "@/lib/logr"
+import { getServerLogrClient, type ServiceAccount, type APIKey, type RetentionStats } from "@/lib/logr"
 import { Key, Users, Shield } from "lucide-react"
 
-async function getAdminData() {
+async function getAdminData(): Promise<{
+  accounts: ServiceAccount[]
+  keys: APIKey[]
+  retention: RetentionStats | null
+}> {
   try {
     const client = getServerLogrClient()
     const [accountsResult, keysResult, statsResult] = await Promise.all([

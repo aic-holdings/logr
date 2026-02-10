@@ -53,7 +53,11 @@ Service accounts can be created for per-app auth.
 - Public: `logr.jettaintelligence.com` (custom domain, TLS may need setup)
 - Railway default: `logr-api-production.up.railway.app` (always accessible)
 
-**Note:** TCP proxy not enabled on pgvector — database only reachable from within Railway private network. No local psql access.
+**TCP Proxy (cross-project + local access):**
+- `shuttle.proxy.rlwy.net:45970` → port 5432
+- Use `sslmode=disable` (Railway TCP proxy doesn't terminate SSL)
+- Connection string: `postgresql://postgres:<password>@shuttle.proxy.rlwy.net:45970/railway?sslmode=disable`
+- Used by `aic-logging` package in bot-farm (via `LOG_DB_URL` env var)
 
 ## API Endpoints
 

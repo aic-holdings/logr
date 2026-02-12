@@ -139,7 +139,7 @@ class EmbeddingPipeline:
                     await session.execute(
                         text(
                             "UPDATE log_entries "
-                            "SET embedding = :emb::vector, "
+                            "SET embedding = CAST(:emb AS vector), "
                             "    embedding_model = :model "
                             "WHERE id = :id"
                         ),

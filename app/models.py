@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import (
     Column, String, Text, DateTime, Integer, Float, Index, ForeignKey, BigInteger
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB, TSVECTOR
 from sqlalchemy.orm import declarative_base, relationship
 
 try:
@@ -74,6 +74,9 @@ class LogEntry(Base):
     embedding = Column(Vector(1536) if PGVECTOR_AVAILABLE else Text, nullable=True)
     embedding_model = Column(String(50))  # Model used for embedding
 
+    # === Full-Text Search ===
+    search_vector = Column(TSVECTOR, nullable=True)
+
     # === Relationships ===
     events = relationship("LogEvent", back_populates="log_entry", cascade="all, delete-orphan")
 
@@ -85,6 +88,8 @@ class LogEntry(Base):
         Index("ix_log_entries_trace_timestamp", "trace_id", "timestamp"),
         Index("ix_log_entries_error_type_timestamp", "error_type", "timestamp"),
         Index("ix_log_entries_model_timestamp", "model", "timestamp"),
+        # GIN index for full-text search
+        Index("ix_log_entries_search_vector", "search_vector", postgresql_using="gin"),
     )
 
 

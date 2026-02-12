@@ -161,12 +161,15 @@ export interface SearchResult {
   similarity: number
   trace_id: string | null
   error_type: string | null
+  signals?: Record<string, number> | null
 }
 
 export interface SemanticSearchResponse {
   query: string
   results: SearchResult[]
   total: number
+  signals_used?: Record<string, boolean> | null
+  search_mode?: string | null
 }
 
 // Stats types

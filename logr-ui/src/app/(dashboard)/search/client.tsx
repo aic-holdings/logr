@@ -42,6 +42,55 @@ function SimilarityBar({ score }: { score: number }) {
   )
 }
 
+const SIGNAL_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
+  bm25: { label: "BM25", bg: "bg-blue-100 dark:bg-blue-900", text: "text-blue-700 dark:text-blue-300" },
+  vector: { label: "Vector", bg: "bg-purple-100 dark:bg-purple-900", text: "text-purple-700 dark:text-purple-300" },
+  heuristic: { label: "Heuristic", bg: "bg-amber-100 dark:bg-amber-900", text: "text-amber-700 dark:text-amber-300" },
+  text_fallback: { label: "Text", bg: "bg-gray-100 dark:bg-gray-800", text: "text-gray-700 dark:text-gray-300" },
+}
+
+function SignalIndicators({ signals }: { signals?: Record<string, number> | null }) {
+  if (!signals) return null
+  return (
+    <div className="flex items-center gap-1">
+      {Object.keys(signals).map((key) => {
+        const config = SIGNAL_CONFIG[key]
+        if (!config) return null
+        return (
+          <span
+            key={key}
+            className={cn("px-1.5 py-0.5 rounded text-[10px] font-medium", config.bg, config.text)}
+          >
+            {config.label}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function SignalSummary({ response }: { response: SemanticSearchResponse }) {
+  if (!response.signals_used) return null
+  return (
+    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground flex-wrap">
+      <span>Signals:</span>
+      {Object.entries(response.signals_used).map(([key, active]) => {
+        if (!active) return null
+        const config = SIGNAL_CONFIG[key]
+        if (!config) return null
+        return (
+          <span key={key} className={cn("px-1.5 py-0.5 rounded", config.bg, config.text)}>
+            {config.label}
+          </span>
+        )
+      })}
+      {response.search_mode && (
+        <span className="opacity-70">({response.search_mode})</span>
+      )}
+    </div>
+  )
+}
+
 interface SearchClientProps {
   services: string[]
 }
@@ -131,6 +180,7 @@ export function SearchClient({ services }: SearchClientProps) {
             <CardDescription>
               Showing matches for &ldquo;{results.query}&rdquo;
             </CardDescription>
+            <SignalSummary response={results} />
           </CardHeader>
           <CardContent className="p-0">
             {results.results.length > 0 ? (
@@ -160,6 +210,7 @@ export function SearchClient({ services }: SearchClientProps) {
                       </div>
                       <div className="flex flex-col items-end gap-2 shrink-0">
                         <SimilarityBar score={result.similarity} />
+                        <SignalIndicators signals={result.signals} />
                         <Button
                           variant="ghost"
                           size="sm"

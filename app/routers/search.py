@@ -27,18 +27,23 @@ class SemanticSearchRequest(BaseModel):
     level: Optional[str] = Field(None, description="Filter by log level")
     since: Optional[datetime] = Field(None, description="Search logs after this time")
     limit: int = Field(20, ge=1, le=100, description="Maximum results")
+    mode: Optional[str] = Field(
+        "ensemble",
+        description="Search mode: ensemble (default), vector, bm25, text",
+    )
 
 
 class SearchResult(BaseModel):
-    """Search result with similarity score."""
+    """Search result with fused score and signal breakdown."""
     id: UUID
     service: str
     level: str
     message: str
     timestamp: datetime
     similarity: float
-    trace_id: Optional[str]
-    error_type: Optional[str]
+    trace_id: Optional[str] = None
+    error_type: Optional[str] = None
+    signals: Optional[Dict[str, float]] = None
 
     class Config:
         from_attributes = True
@@ -49,6 +54,8 @@ class SemanticSearchResponse(BaseModel):
     query: str
     results: List[SearchResult]
     total: int
+    signals_used: Optional[Dict[str, bool]] = None
+    search_mode: Optional[str] = None
 
 
 class SimilarLogsRequest(BaseModel):
@@ -80,7 +87,7 @@ class LogPattern(BaseModel):
 # Embedding Utilities
 # ============================================================================
 
-async def get_embedding(text: str) -> Optional[List[float]]:
+async def get_embedding(query_text: str) -> Optional[List[float]]:
     """Get embedding for text using Artemis."""
     if not settings.ARTEMIS_API_KEY:
         return None
@@ -92,12 +99,57 @@ async def get_embedding(text: str) -> Optional[List[float]]:
             response = await client.post(
                 f"{settings.ARTEMIS_URL}/v1/embeddings",
                 headers={"Authorization": f"Bearer {settings.ARTEMIS_API_KEY}"},
-                json={"input": text, "model": settings.EMBEDDING_MODEL},
+                json={"input": query_text, "model": settings.EMBEDDING_MODEL},
             )
             response.raise_for_status()
             return response.json()["data"][0]["embedding"]
     except Exception:
         return None
+
+
+# ============================================================================
+# Text Fallback
+# ============================================================================
+
+async def _text_fallback_search(
+    db: AsyncSession, request: SemanticSearchRequest
+) -> SemanticSearchResponse:
+    """ILIKE text fallback when no other signals are available."""
+    conditions = [LogEntry.message.ilike(f"%{request.query}%")]
+    if request.service:
+        conditions.append(LogEntry.service == request.service)
+    if request.level:
+        conditions.append(LogEntry.level == request.level.lower())
+    if request.since:
+        conditions.append(LogEntry.timestamp >= request.since)
+
+    result = await db.execute(
+        select(LogEntry)
+        .where(and_(*conditions))
+        .order_by(desc(LogEntry.timestamp))
+        .limit(request.limit)
+    )
+    logs = result.scalars().all()
+
+    return SemanticSearchResponse(
+        query=request.query,
+        results=[
+            SearchResult(
+                id=log.id,
+                service=log.service,
+                level=log.level,
+                message=log.message,
+                timestamp=log.timestamp,
+                similarity=1.0,
+                trace_id=log.trace_id,
+                error_type=log.error_type,
+            )
+            for log in logs
+        ],
+        total=len(logs),
+        signals_used={"text_fallback": True},
+        search_mode="text",
+    )
 
 
 # ============================================================================
@@ -111,101 +163,67 @@ async def semantic_search(
     api_key: APIKey = Depends(verify_read_permission),
 ):
     """
-    Semantic search over log messages using vector similarity.
+    Ensemble search over log messages using BM25 + vector + heuristics with RRF fusion.
 
-    Find logs that are semantically similar to a natural language query,
-    even if they don't contain the exact keywords.
+    Combines:
+    - BM25 full-text search (keyword matching via PostgreSQL tsvector)
+    - Vector similarity (semantic meaning via pgvector embeddings)
+    - Heuristics (recency boost, error level weighting)
 
-    Example queries:
-    - "database connection timeout"
-    - "user authentication failed"
-    - "slow API response"
+    Results are fused using Reciprocal Rank Fusion (RRF).
+    Degrades gracefully when embeddings are unavailable.
     """
-    # Get query embedding
-    query_embedding = await get_embedding(request.query)
+    from app.search_engine import ensemble_search
 
-    if not query_embedding:
-        # Fallback to text search if embeddings not available
-        conditions = [LogEntry.message.ilike(f"%{request.query}%")]
-        if request.service:
-            conditions.append(LogEntry.service == request.service)
-        if request.level:
-            conditions.append(LogEntry.level == request.level.lower())
-        if request.since:
-            conditions.append(LogEntry.timestamp >= request.since)
+    mode = (request.mode or "ensemble").lower()
 
-        result = await db.execute(
-            select(LogEntry)
-            .where(and_(*conditions))
-            .order_by(desc(LogEntry.timestamp))
-            .limit(request.limit)
-        )
-        logs = result.scalars().all()
+    # Legacy text fallback mode
+    if mode == "text":
+        return await _text_fallback_search(db, request)
 
-        return SemanticSearchResponse(
-            query=request.query,
-            results=[
-                SearchResult(
-                    id=log.id,
-                    service=log.service,
-                    level=log.level,
-                    message=log.message,
-                    timestamp=log.timestamp,
-                    similarity=1.0,  # Text match
-                    trace_id=log.trace_id,
-                    error_type=log.error_type,
-                )
-                for log in logs
-            ],
-            total=len(logs),
-        )
+    # Get query embedding (may return None if Artemis is down)
+    query_embedding = None
+    if mode in ("ensemble", "vector"):
+        query_embedding = await get_embedding(request.query)
 
-    # Vector similarity search
-    embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
+    # Vector-only mode without embedding available: degrade to ensemble
+    if mode == "vector" and not query_embedding:
+        mode = "ensemble"
 
-    conditions = ["embedding IS NOT NULL"]
-    params = {"embedding": embedding_str, "limit": request.limit}
+    # Run ensemble search
+    fused_results, signals_used = await ensemble_search(
+        db,
+        request.query,
+        query_embedding,
+        service=request.service,
+        level=request.level,
+        since=request.since,
+        limit=request.limit,
+    )
 
-    if request.service:
-        conditions.append("service = :service")
-        params["service"] = request.service
-    if request.level:
-        conditions.append("level = :level")
-        params["level"] = request.level.lower()
-    if request.since:
-        conditions.append("timestamp >= :since")
-        params["since"] = request.since
-
-    where_clause = " AND ".join(conditions)
-
-    query = text(f"""
-        SELECT id, service, level, message, timestamp, trace_id, error_type,
-               1 - (embedding <=> CAST(:embedding AS vector)) as similarity
-        FROM log_entries
-        WHERE {where_clause}
-        ORDER BY embedding <=> CAST(:embedding AS vector)
-        LIMIT :limit
-    """)
-
-    result = await db.execute(query, params)
-    rows = result.fetchall()
+    # If ensemble returned nothing, fall back to text
+    if not fused_results:
+        return await _text_fallback_search(db, request)
 
     return SemanticSearchResponse(
         query=request.query,
         results=[
             SearchResult(
-                id=row.id,
-                service=row.service,
-                level=row.level,
-                message=row.message,
-                timestamp=row.timestamp,
-                similarity=float(row.similarity),
-                trace_id=row.trace_id,
-                error_type=row.error_type,
+                id=r["id"],
+                service=r["service"],
+                level=r["level"],
+                message=r["message"],
+                timestamp=r["timestamp"],
+                similarity=r.get("similarity", 0.0),
+                trace_id=r.get("trace_id"),
+                error_type=r.get("error_type"),
+                signals=r.get("signals"),
             )
-            for row in rows
+            for r in fused_results
         ],
-        total=len(rows),
+        total=len(fused_results),
+        signals_used=signals_used,
+        search_mode=mode,
     )
 
 
@@ -260,7 +278,7 @@ async def find_similar_logs(
         ]
 
     # Vector similarity
-    embedding_str = f"[{','.join(str(x) for x in ref_log.embedding)}]"
+    embedding_str = "[" + ",".join(str(x) for x in ref_log.embedding) + "]"
 
     conditions = ["embedding IS NOT NULL", "id != :ref_id"]
     params = {"embedding": embedding_str, "ref_id": request.log_id, "limit": request.limit}

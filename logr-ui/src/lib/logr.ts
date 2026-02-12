@@ -89,9 +89,10 @@ export interface APIKey {
 }
 
 export interface RetentionStats {
-  retention_days: number
+  total_logs: number
   logs_to_delete: number
   oldest_log: string | null
+  retention_days: number
 }
 
 export interface ErrorSpike {
@@ -116,9 +117,25 @@ export interface NewErrorType {
 }
 
 export interface AnomaliesResponse {
-  error_spikes: ErrorSpike[]
-  latency_anomalies: LatencyAnomaly[]
-  new_error_types: NewErrorType[]
+  time_window_hours: number
+  anomalies: Anomaly[]
+  current_period: PeriodStats
+  previous_period: PeriodStats
+}
+
+export interface Anomaly {
+  type: string
+  severity: string
+  message: string
+  previous?: number
+  current?: number
+  error_types?: string[]
+}
+
+export interface PeriodStats {
+  total: number
+  errors: number
+  avg_latency_ms: number | null
 }
 
 export interface AdminStats {
@@ -131,6 +148,111 @@ export interface AdminStats {
   date_range: {
     oldest: string | null
     newest: string | null
+  }
+}
+
+// Search types
+export interface SearchResult {
+  id: string
+  service: string
+  level: string
+  message: string
+  timestamp: string
+  similarity: number
+  trace_id: string | null
+  error_type: string | null
+}
+
+export interface SemanticSearchResponse {
+  query: string
+  results: SearchResult[]
+  total: number
+}
+
+// Stats types
+export interface ModelStats {
+  count: number
+  tokens_in: number
+  tokens_out: number
+  cost_usd: number
+}
+
+export interface LatencyStats {
+  avg_ms: number | null
+  min_ms: number | null
+  max_ms: number | null
+  p50_ms: number | null
+  p95_ms: number | null
+  p99_ms: number | null
+}
+
+export interface StatsResponse {
+  time_window_hours: number
+  total: number
+  by_level: Record<string, number>
+  by_service: Record<string, number>
+  by_model: Record<string, ModelStats>
+  by_error: Record<string, number>
+  latency: LatencyStats
+}
+
+// Grouped errors types
+export interface ErrorGroup {
+  error_type: string | null
+  message_prefix: string
+  count: number
+  first_seen: string
+  last_seen: string
+  services: string[]
+}
+
+export interface GroupedErrorsResponse {
+  time_window_hours: number
+  total_groups: number
+  groups: ErrorGroup[]
+}
+
+// Trace types
+export interface TraceResponse {
+  trace_id: string
+  logs: LogEntry[]
+  span_count: number
+  services: string[]
+  start_time: string
+  end_time: string
+  total_duration_ms: number | null
+}
+
+export interface TraceSpansResponse {
+  trace_id: string
+  spans: Span[]
+  tree: SpanNode[]
+  services: string[]
+  total_duration_ms: number | null
+}
+
+export interface SpanNode {
+  span: Span
+  children: SpanNode[]
+}
+
+// Embedding pipeline status
+export interface EmbeddingStatus {
+  enabled: boolean
+  running: boolean
+  daily_count: number
+  daily_cap: number
+  daily_date: string | null
+  total_embedded: number
+  total_errors: number
+  last_run: string | null
+  config: {
+    poll_interval_seconds: number
+    batch_size: number
+    min_message_length: number
+    excluded_services: string[]
+    excluded_levels: string[]
+    embedding_model: string
   }
 }
 
@@ -160,7 +282,7 @@ class LogrClient {
   }
 
   // Logs
-  async getLogs(params: LogQueryParams = {}): Promise<{ logs: LogEntry[]; total: number }> {
+  async getLogs(params: LogQueryParams = {}): Promise<{ logs: LogEntry[]; total: number; page: number; page_size: number; has_more: boolean }> {
     const searchParams = new URLSearchParams()
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) searchParams.set(key, String(value))
@@ -172,19 +294,19 @@ class LogrClient {
     return this.fetch(`/v1/logs/${id}`)
   }
 
-  async getLogsByTrace(traceId: string): Promise<{ logs: LogEntry[] }> {
+  async getLogsByTrace(traceId: string): Promise<TraceResponse> {
     return this.fetch(`/v1/logs/trace/${traceId}`)
   }
 
-  async getServices(): Promise<{ services: string[] }> {
+  async getServices(): Promise<string[]> {
     return this.fetch("/v1/logs/services")
   }
 
-  async getModels(): Promise<{ models: string[] }> {
+  async getModels(): Promise<string[]> {
     return this.fetch("/v1/logs/models")
   }
 
-  async getStats(params: { service?: string; hours?: number } = {}): Promise<Record<string, unknown>> {
+  async getStats(params: { service?: string; hours?: number } = {}): Promise<StatsResponse> {
     const searchParams = new URLSearchParams()
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) searchParams.set(key, String(value))
@@ -201,19 +323,19 @@ class LogrClient {
     return this.fetch(`/v1/spans?${searchParams}`)
   }
 
-  async getTrace(traceId: string): Promise<{ trace_id: string; spans: Span[] }> {
+  async getTrace(traceId: string): Promise<TraceSpansResponse> {
     return this.fetch(`/v1/spans/trace/${traceId}`)
   }
 
   // Search
-  async semanticSearch(query: string, params: { service?: string; limit?: number } = {}): Promise<{ results: LogEntry[] }> {
+  async semanticSearch(query: string, params: { service?: string; limit?: number } = {}): Promise<SemanticSearchResponse> {
     return this.fetch("/v1/search/semantic", {
       method: "POST",
       body: JSON.stringify({ query, ...params }),
     })
   }
 
-  async findSimilar(logId: string, limit: number = 10): Promise<{ similar: LogEntry[] }> {
+  async findSimilar(logId: string, limit: number = 10): Promise<SearchResult[]> {
     return this.fetch("/v1/search/similar", {
       method: "POST",
       body: JSON.stringify({ log_id: logId, limit }),
@@ -224,7 +346,7 @@ class LogrClient {
     return this.fetch(`/v1/search/anomalies?hours=${hours}`)
   }
 
-  async getGroupedErrors(params: { hours?: number; service?: string } = {}): Promise<Record<string, unknown>> {
+  async getGroupedErrors(params: { hours?: number; service?: string; min_count?: number } = {}): Promise<GroupedErrorsResponse> {
     const searchParams = new URLSearchParams()
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) searchParams.set(key, String(value))
@@ -258,6 +380,10 @@ class LogrClient {
 
   async getRetentionStats(): Promise<RetentionStats> {
     return this.fetch("/v1/admin/retention/stats")
+  }
+
+  async getEmbeddingStatus(): Promise<EmbeddingStatus> {
+    return this.fetch("/v1/admin/embeddings/status")
   }
 }
 

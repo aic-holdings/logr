@@ -1,5 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getServerLogrClient, type AnomaliesResponse } from "@/lib/logr"
+import { getServerLogrClient, type AnomaliesResponse, type Anomaly } from "@/lib/logr"
 import { AlertTriangle, TrendingUp, Zap } from "lucide-react"
 
 async function getAnomalies(): Promise<AnomaliesResponse | null> {
@@ -11,8 +11,16 @@ async function getAnomalies(): Promise<AnomaliesResponse | null> {
   }
 }
 
+function filterByType(anomalies: Anomaly[], type: string): Anomaly[] {
+  return anomalies.filter((a) => a.type === type)
+}
+
 export default async function AnomaliesPage() {
-  const anomalies = await getAnomalies()
+  const data = await getAnomalies()
+  const anomalies = data?.anomalies ?? []
+  const errorSpikes = filterByType(anomalies, "error_rate_spike")
+  const latencySpikes = filterByType(anomalies, "latency_spike")
+  const newErrors = filterByType(anomalies, "new_error_types")
 
   return (
     <div className="space-y-6">
@@ -31,7 +39,7 @@ export default async function AnomaliesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {anomalies?.error_spikes?.length ?? 0}
+              {errorSpikes.length}
             </div>
             <p className="text-xs text-muted-foreground">
               Unusual error rate increases
@@ -46,7 +54,7 @@ export default async function AnomaliesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {anomalies?.latency_anomalies?.length ?? 0}
+              {latencySpikes.length}
             </div>
             <p className="text-xs text-muted-foreground">
               Slower than normal responses
@@ -61,7 +69,7 @@ export default async function AnomaliesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {anomalies?.new_error_types?.length ?? 0}
+              {newErrors.length}
             </div>
             <p className="text-xs text-muted-foreground">
               Previously unseen errors
@@ -70,67 +78,87 @@ export default async function AnomaliesPage() {
         </Card>
       </div>
 
-      {/* Error Spikes */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Error Spikes (Last 24h)</CardTitle>
-          <CardDescription>
-            Services with unusual error rate increases
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {anomalies && anomalies.error_spikes.length > 0 ? (
-            <div className="space-y-4">
-              {anomalies.error_spikes.map((spike, i) => (
-                <div key={i} className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                  <div>
-                    <span className="font-medium">{spike.service}</span>
-                    <p className="text-sm text-muted-foreground">
-                      {spike.current_rate.toFixed(1)}% error rate (baseline: {spike.baseline_rate.toFixed(1)}%)
-                    </p>
-                  </div>
-                  <span className="text-red-600 font-bold">
-                    +{spike.increase.toFixed(0)}%
-                  </span>
-                </div>
-              ))}
+      {/* Period Comparison */}
+      {data && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Period Comparison (Last 24h vs Previous 24h)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Current Total</span>
+                <p className="text-lg font-bold">{data.current_period.total}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Current Errors</span>
+                <p className="text-lg font-bold text-red-500">{data.current_period.errors}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Avg Latency</span>
+                <p className="text-lg font-bold">
+                  {data.current_period.avg_latency_ms
+                    ? `${data.current_period.avg_latency_ms.toFixed(0)}ms`
+                    : "N/A"}
+                </p>
+              </div>
             </div>
-          ) : (
-            <p className="text-center text-muted-foreground py-8">
-              No error spikes detected
-            </p>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* New Error Types */}
+      {/* Anomaly Details */}
       <Card>
         <CardHeader>
-          <CardTitle>New Error Types</CardTitle>
+          <CardTitle>Detected Anomalies</CardTitle>
           <CardDescription>
-            Error types seen for the first time
+            Issues detected in the last 24 hours
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {anomalies && anomalies.new_error_types.length > 0 ? (
-            <div className="space-y-2">
-              {anomalies.new_error_types.map((error, i) => (
-                <div key={i} className="flex items-center justify-between p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+          {anomalies.length > 0 ? (
+            <div className="space-y-4">
+              {anomalies.map((anomaly, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center justify-between p-3 rounded-lg ${
+                    anomaly.severity === "high"
+                      ? "bg-red-50 dark:bg-red-900/20"
+                      : "bg-yellow-50 dark:bg-yellow-900/20"
+                  }`}
+                >
                   <div>
-                    <span className="font-medium font-mono">{error.error_type}</span>
-                    <p className="text-sm text-muted-foreground">
-                      in {error.service} • first seen {new Date(error.first_seen).toLocaleString()}
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        anomaly.severity === "high"
+                          ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                          : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+                      }`}>
+                        {anomaly.severity.toUpperCase()}
+                      </span>
+                      <span className="font-medium capitalize">
+                        {anomaly.type.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {anomaly.message}
                     </p>
+                    {anomaly.error_types && (
+                      <div className="flex gap-1 mt-1 flex-wrap">
+                        {anomaly.error_types.map((et, j) => (
+                          <span key={j} className="text-xs font-mono bg-muted px-1 rounded">
+                            {et}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <span className="text-muted-foreground">
-                    {error.count} occurrences
-                  </span>
                 </div>
               ))}
             </div>
           ) : (
             <p className="text-center text-muted-foreground py-8">
-              No new error types detected
+              No anomalies detected - all systems normal
             </p>
           )}
         </CardContent>

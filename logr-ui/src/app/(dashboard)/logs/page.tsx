@@ -11,7 +11,7 @@ async function getInitialData() {
     ])
     return {
       logs: logsResult.logs,
-      services: servicesResult.services,
+      services: servicesResult,
     }
   } catch {
     return { logs: [], services: [] }

@@ -321,17 +321,18 @@ async def get_grouped_errors(
         conditions.append(LogEntry.service == service)
 
     # Group by error_type and first 100 chars of message
+    message_prefix = func.left(LogEntry.message, 100)
     query = (
         select(
             LogEntry.error_type,
-            func.substring(LogEntry.message, 1, 100).label("message_prefix"),
+            message_prefix.label("message_prefix"),
             func.count(LogEntry.id).label("count"),
             func.min(LogEntry.timestamp).label("first_seen"),
             func.max(LogEntry.timestamp).label("last_seen"),
             func.array_agg(func.distinct(LogEntry.service)).label("services"),
         )
         .where(and_(*conditions))
-        .group_by(LogEntry.error_type, func.substring(LogEntry.message, 1, 100))
+        .group_by(LogEntry.error_type, message_prefix)
         .having(func.count(LogEntry.id) >= min_count)
         .order_by(desc(func.count(LogEntry.id)))
         .limit(50)

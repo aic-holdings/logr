@@ -86,14 +86,13 @@ class LogEventResponse(BaseModel):
     event_type: str
     content: Optional[str]
     content_type: str
-    metadata: Dict[str, Any] = Field(validation_alias="event_metadata")
+    event_metadata: Dict[str, Any] = Field(default_factory=dict)
     sequence: int
     duration_ms: Optional[float]
     timestamp: datetime
 
     class Config:
         from_attributes = True
-        populate_by_name = True
 
 
 class LogEntryResponse(BaseModel):

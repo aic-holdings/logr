@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models import APIKey, ServiceAccount, LogEntry, LogEvent, Span
 from app.auth import verify_master_key, generate_api_key, hash_api_key, get_key_prefix
 from app.config import settings
+from app.embeddings import pipeline as embedding_pipeline
 
 router = APIRouter(prefix="/v1/admin", tags=["Admin"])
 
@@ -220,6 +221,19 @@ async def revoke_key(
     await db.commit()
 
     return {"message": f"API key {key.key_prefix}... revoked"}
+
+
+# ============================================================================
+# Embedding Pipeline
+# ============================================================================
+
+
+@router.get("/embeddings/status")
+async def get_embedding_status(
+    _: bool = Depends(verify_master_key),
+):
+    """Get embedding pipeline status and statistics."""
+    return embedding_pipeline.get_status()
 
 
 # ============================================================================

@@ -1,4 +1,5 @@
 """Logr - Centralized structured logging service for AI-powered analysis."""
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Depends
@@ -14,6 +15,7 @@ from app.middleware import (
     RequestSizeLimitMiddleware,
     MetricsMiddleware,
 )
+from app.embeddings import pipeline as embedding_pipeline
 
 # Global metrics instance
 metrics_middleware = None
@@ -21,9 +23,18 @@ metrics_middleware = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database on startup."""
+    """Initialize database on startup, start background tasks."""
     await init_db()
+    # Start embedding pipeline as background task
+    task = asyncio.create_task(embedding_pipeline.start())
     yield
+    # Stop embedding pipeline on shutdown
+    embedding_pipeline.stop()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(

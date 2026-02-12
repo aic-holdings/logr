@@ -33,6 +33,9 @@ class Settings:
     ARTEMIS_API_KEY: str = os.environ.get("ARTEMIS_API_KEY", "")
     ARTEMIS_URL: str = os.environ.get("ARTEMIS_URL", "https://artemis.jettaintelligence.com")
 
+    # Embedding pipeline
+    EMBEDDING_DAILY_CAP: int = int(os.environ.get("EMBEDDING_DAILY_CAP", "50000"))
+
 
 @lru_cache
 def get_settings() -> Settings:

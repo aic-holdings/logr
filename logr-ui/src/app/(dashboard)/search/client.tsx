@@ -285,9 +285,9 @@ export function SearchClient({ services }: SearchClientProps) {
               <p className="text-sm mt-3 mb-4">Try an example:</p>
               <div className="flex flex-wrap justify-center gap-2">
                 {[
-                  "connection closed or timed out",
-                  "error processing slack message",
-                  "LLM token usage and cost",
+                  "connection closed",
+                  "something broke",
+                  "connecting to endpoint",
                 ].map((example) => (
                   <button
                     key={example}

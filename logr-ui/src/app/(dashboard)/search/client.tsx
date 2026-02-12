@@ -282,9 +282,34 @@ export function SearchClient({ services }: SearchClientProps) {
             <div className="text-center text-muted-foreground">
               <Sparkles className="h-8 w-8 mx-auto mb-3 opacity-50" />
               <p>Enter a natural language query to search logs by meaning.</p>
-              <p className="text-sm mt-1">
-                Examples: &ldquo;database connection timeout&rdquo;, &ldquo;user authentication failed&rdquo;, &ldquo;slow API response&rdquo;
-              </p>
+              <p className="text-sm mt-3 mb-4">Try an example:</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {[
+                  "connection closed or timed out",
+                  "error processing slack message",
+                  "LLM token usage and cost",
+                ].map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => {
+                      setQuery(example)
+                      setSimilarResults(null)
+                      startTransition(async () => {
+                        try {
+                          const data = await searchLogs(example, selectedService || undefined, 20)
+                          setResults(data)
+                        } catch {
+                          setResults({ query: example, results: [], total: 0 })
+                        }
+                      })
+                    }}
+                    className="px-3 py-1.5 text-sm rounded-full border hover:bg-muted transition-colors"
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
             </div>
           </CardContent>
         </Card>

@@ -180,10 +180,10 @@ async def semantic_search(
 
     query = text(f"""
         SELECT id, service, level, message, timestamp, trace_id, error_type,
-               1 - (embedding <=> :embedding::vector) as similarity
+               1 - (embedding <=> CAST(:embedding AS vector)) as similarity
         FROM log_entries
         WHERE {where_clause}
-        ORDER BY embedding <=> :embedding::vector
+        ORDER BY embedding <=> CAST(:embedding AS vector)
         LIMIT :limit
     """)
 
@@ -273,10 +273,10 @@ async def find_similar_logs(
 
     query = text(f"""
         SELECT id, service, level, message, timestamp, trace_id, error_type,
-               1 - (embedding <=> :embedding::vector) as similarity
+               1 - (embedding <=> CAST(:embedding AS vector)) as similarity
         FROM log_entries
         WHERE {where_clause}
-        ORDER BY embedding <=> :embedding::vector
+        ORDER BY embedding <=> CAST(:embedding AS vector)
         LIMIT :limit
     """)
 
